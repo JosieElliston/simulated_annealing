@@ -203,6 +203,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "histo"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6a96a1c8acf372eefef3b065d800986a6d11abdc2c27cc61255513646b3df6c"
+dependencies = [
+ "streaming-stats",
+]
+
+[[package]]
 name = "image"
 version = "0.24.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -424,9 +433,11 @@ checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 name = "simulated_annealing"
 version = "0.1.0"
 dependencies = [
+ "histo",
  "image",
  "rand",
  "raylib",
+ "rayon",
 ]
 
 [[package]]
@@ -442,6 +453,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
+]
+
+[[package]]
+name = "streaming-stats"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc32bf233385fb1ae0c4cf13a8dfd11efec71f6a9de95feac8c870788bc8b25"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

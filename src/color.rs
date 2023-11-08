@@ -93,16 +93,20 @@ use rand::prelude::*;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Color {
-    b: u8,
+    // b: u8,
+    pub(crate) b: f32,
 }
 
 impl Color {
     pub(crate) fn new_rand(rng: &mut impl Rng) -> Color {
-        Color { b: rng.gen_range(0..=255)}
+        // Color { b: rng.gen_range(0..=255)}
+        Color { b: rng.gen_range(0.0..1.0)}
     }
 
+    #[inline(always)]
     pub(crate) fn distance(a: &Color, b: &Color) -> f32 {
-        (a.b as f32 - b.b as f32).abs()
+        // (a.b as f32 - b.b as f32).abs()
+        (a.b - b.b).abs()
     }
 }
 
@@ -111,7 +115,7 @@ impl From<Color> for raylib::prelude::Color {
         raylib::prelude::Color {
             r: 0,
             g: 0,
-            b: value.b,
+            b: (value.b * 255.0) as u8,
             a: 255,
         }
     }

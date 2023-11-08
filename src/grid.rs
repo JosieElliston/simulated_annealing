@@ -1,16 +1,20 @@
 use rand::prelude::*;
 use raylib::prelude::{RaylibDraw, RaylibDrawHandle};
+use rayon::prelude::*;
 
 use crate::color::*;
 
-const SIZE: usize = 256;
+const SIZE: usize = 256; // what ive been benching
+// const SIZE: usize = 1024*2;
+
 const LOCAL_RADIUS: i32 = (SIZE / 16) as i32;
-const STEP_RADIUS: i32 = LOCAL_RADIUS*2;
-// original: nanos per step: 4164.047
+const STEP_RADIUS: i32 = LOCAL_RADIUS * 2;
+// baseline: 3363.0659340659336
+// new but incorrect: 2052.802197802198
 
 pub(crate) struct Grid {
-    // neighbor_deltas: Vec<((i32, i32), f32)>,
-    neighbors: Vec<Vec<Vec<((usize, usize), f32)>>>,
+    neighbor_deltas: Vec<((i32, i32), f32)>,
+    // neighbors: Vec<Vec<Vec<((usize, usize), f32)>>>,
     colors: Vec<Vec<Color>>,
 }
 
@@ -21,126 +25,222 @@ impl Grid {
             .flat_map(|y| {
                 (-LOCAL_RADIUS..=LOCAL_RADIUS)
                     .filter_map(|x| {
-                        let distance = Grid::point_distance(0, 0, x, y);
-                        if distance <= LOCAL_RADIUS as f32 {
-                            Some(((x, y), distance))
-                        } else {
+                        if x == 0 && y == 0 {
                             None
+                        } else {
+                            let distance = Grid::point_distance(0, 0, x, y);
+                            if distance <= LOCAL_RADIUS as f32 {
+                                Some(((x, y), distance))
+                            } else {
+                                None
+                            }
                         }
                     })
                     .collect::<Vec<((i32, i32), f32)>>()
                     .into_iter()
             })
             .collect();
+        // let neighbors: Vec<Vec<Vec<((usize, usize), f32)>>> = (0..SIZE)
+        // .map(|y0| {
+        //     (0..SIZE)
+        //         .map(|x0| {
+        //             neighbor_deltas
+        //                 .iter()
+        //                 .map(|&((dx, dy), distance)| {
+        //                     let mut x = x0 as i32 + dx;
+        //                     let mut y = y0 as i32 + dy;
+        //                     if x < 0 {
+        //                         x += SIZE as i32;
+        //                     } else if x >= SIZE as i32 {
+        //                         x -= SIZE as i32;
+        //                     }
+        //                     assert!(0 <= x && x < SIZE as i32);
+        //                     if y < 0 {
+        //                         y += SIZE as i32;
+        //                     } else if y >= SIZE as i32 {
+        //                         y -= SIZE as i32;
+        //                     }
+        //                     assert!(0 <= y && y < SIZE as i32);
+        //                     ((x as usize, y as usize), distance)
+        //                 })
+        //                 .collect()
+        //         })
+        //         .collect()
+        // })
+        // .collect();
         Grid {
-            neighbors: (0..SIZE)
-                .map(|y0| {
-                    (0..SIZE)
-                        .map(|x0| {
-                            neighbor_deltas
-                                .iter()
-                                .map(|&((dx, dy), distance)| {
-                                    let mut x = x0 as i32 + dx;
-                                    let mut y = y0 as i32 + dy;
-                                    if x < 0 {
-                                        x += SIZE as i32;
-                                    } else if x >= SIZE as i32 {
-                                        x -= SIZE as i32;
-                                    }
-                                    assert!(0 <= x && x < SIZE as i32);
-                                    if y < 0 {
-                                        y += SIZE as i32;
-                                    } else if y >= SIZE as i32 {
-                                        y -= SIZE as i32;
-                                    }
-                                    assert!(0 <= y && y < SIZE as i32);
-                                    ((x as usize, y as usize), distance)
-                                })
-                                .collect()
-                        })
-                        .collect()
-                })
-                .collect(),
+            neighbor_deltas,
             colors: (0..SIZE)
                 .map(|_| (0..SIZE).map(|_| Color::new_rand(rng)).collect())
                 .collect(),
         }
     }
 
-    // TODO: make it so it doesn't need to actually do the swap
-    fn new_better(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) -> (f32, f32) {
-        // returns whether after the swap it is better
-        // let neighbors1: Vec<((usize, usize), f32)> = self
-        //     .neighbor_deltas
-        //     .iter()
-        //     .filter_map(|&((dx, dy), distance)| {
-        //         let x = x1 as i32 + dx;
-        //         let y = y1 as i32 + dy;
-        //         // assert!(Grid::point_distance(x1 as i32, y1 as i32, x, y) == distance);
-        //         if 0 <= x && x < SIZE as i32 && 0 <= y && y < SIZE as i32 {
-        //             Some(((x as usize, y as usize), distance))
-        //         } else {
-        //             None
-        //         }
-        //     })
-        //     .collect();
-        // let neighbors2: Vec<((usize, usize), f32)> = self
-        //     .neighbor_deltas
-        //     .iter()
-        //     .filter_map(|&((dx, dy), distance)| {
-        //         let x = x2 as i32 + dx;
-        //         let y = y2 as i32 + dy;
-        //         // assert!(Grid::point_distance(x2 as i32, y2 as i32, x, y) == distance);
-        //         if 0 <= x && x < SIZE as i32 && 0 <= y && y < SIZE as i32 {
-        //             Some(((x as usize, y as usize), distance))
-        //         } else {
-        //             None
-        //         }
-        //     })
-        //     .collect();
+    // fn sort_helper(colors: &mut Vec<Color>) {
+    //     for i in 0..colors.len() {
+    //         for j in i + 1..colors.len() {
+    //             if colors[i].b > colors[j].b {
+    //                 (colors[i], colors[j]) = (colors[j], colors[i]);
+    //             }
+    //         }
+    //     }
+    // }
 
-        let mut cost0 = 0.0;
-        for &((x, y), distance) in self.neighbors[y1][x1].iter() {
-            cost0 += Grid::cost(
-                Color::distance(&self.colors[y1][x1], &self.colors[y][x]),
-                distance,
-            );
-        }
-        for &((x, y), distance) in self.neighbors[y2][x2].iter() {
-            cost0 += Grid::cost(
-                Color::distance(&self.colors[y2][x2], &self.colors[y][x]),
-                distance,
-            );
-        }
+    // pub(crate) fn sort(&mut self) {
+    //     for i in 0..SIZE * SIZE {
+    //         for j in i + 1..SIZE * SIZE {
+    //             if self.colors[i / SIZE][i % SIZE].b > self.colors[j / SIZE][j % SIZE].b {
+    //                 (
+    //                     self.colors[i / SIZE][i % SIZE],
+    //                     self.colors[j / SIZE][j % SIZE],
+    //                 ) = (
+    //                     self.colors[j / SIZE][j % SIZE],
+    //                     self.colors[i / SIZE][i % SIZE],
+    //                 );
+    //             }
+    //         }
+    //     }
+    // }
 
-        (self.colors[y1][x1], self.colors[y2][x2]) = (self.colors[y2][x2], self.colors[y1][x1]);
-
-        let mut cost1 = 0.0;
-        for &((x, y), distance) in self.neighbors[y1][x1].iter() {
-            cost1 += Grid::cost(
-                Color::distance(&self.colors[y1][x1], &self.colors[y][x]),
-                distance,
-            );
-            // if cost1 > cost0 {
-            //     // old is better
-            //     return false;
-            // }
-        }
-        for &((x, y), distance) in self.neighbors[y2][x2].iter() {
-            cost1 += Grid::cost(
-                Color::distance(&self.colors[y2][x2], &self.colors[y][x]),
-                distance,
-            );
-            // if cost1 > cost0 {
-            //     // old is better
-            //     return false;
-            // }
-        }
-
-        // debug_assert!(cost1 <= cost0);
-        (cost0, cost1)
+    #[inline(always)]
+    fn modulo(&self, i: usize, i_delta: i32) -> usize {
+        (((i + SIZE) as i32) + i_delta) as usize % SIZE
+        // let i = (((i + SIZE) as i32) + i_delta) as usize;
+        // if i >= 2 * SIZE {
+        //     i - 2 * SIZE
+        // } else if i >= SIZE {
+        //     i - SIZE
+        // } else {
+        //     i
+        // }
+        // ((((i + SIZE) as i32) + i_delta) % SIZE as i32) as usize
     }
 
+    #[inline(always)]
+    fn swap(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) {
+        (self.colors[y1][x1], self.colors[y2][x2]) = (self.colors[y2][x2], self.colors[y1][x1]);
+    }
+
+    // TODO: make it so it doesn't need to actually do the swap
+    // fn new_better_oracle(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) -> (f32, f32) {
+    //     // returns whether after the swap it is better
+    //     let mut cost0 = 0.0;
+    //     for &((dx, dy), distance) in self.neighbor_deltas.iter() {
+    //         let x = self.modulo(x1, dx);
+    //         let y = self.modulo(y1, dy);
+    //         cost0 += Grid::cost(
+    //             Color::distance(&self.colors[y1][x1], &self.colors[y][x]),
+    //             distance,
+    //         );
+    //     }
+    //     for &((dx, dy), distance) in self.neighbor_deltas.iter() {
+    //         let x = self.modulo(x2, dx);
+    //         let y = self.modulo(y2, dy);
+    //         cost0 += Grid::cost(
+    //             Color::distance(&self.colors[y2][x2], &self.colors[y][x]),
+    //             distance,
+    //         );
+    //     }
+
+    //     self.swap(x1, y1, x2, y2);
+
+    //     let mut cost1 = 0.0;
+    //     for &((dx, dy), distance) in self.neighbor_deltas.iter() {
+    //         let x = self.modulo(x1, dx);
+    //         let y = self.modulo(y1, dy);
+    //         cost1 += Grid::cost(
+    //             Color::distance(&self.colors[y1][x1], &self.colors[y][x]),
+    //             distance,
+    //         );
+    //         // if cost1 > cost0 {
+    //         //     // old is better
+    //         //     return false;
+    //         // }
+    //     }
+    //     for &((dx, dy), distance) in self.neighbor_deltas.iter() {
+    //         let x = self.modulo(x2, dx);
+    //         let y = self.modulo(y2, dy);
+    //         cost1 += Grid::cost(
+    //             Color::distance(&self.colors[y2][x2], &self.colors[y][x]),
+    //             distance,
+    //         );
+    //         // if cost1 > cost0 {
+    //         //     // old is better
+    //         //     return false;
+    //         // }
+    //     }
+
+    //     self.swap(x1, y1, x2, y2);
+
+    //     (cost0, cost1)
+    // }
+
+    // slow
+    // fn pseudo_swap_get(
+    //     &self,
+    //     x1: usize,
+    //     y1: usize,
+    //     x2: usize,
+    //     y2: usize,
+    //     x: usize,
+    //     y: usize,
+    // ) -> &Color {
+    // gets the color as though p1 and p2 were swapped
+    //     if x == x1 && y == y1 {
+    //         &self.colors[y2][x2]
+    //     } else if x == x2 && y == y2 {
+    //         &self.colors[y1][x1]
+    //     } else {
+    //         &self.colors[y][x]
+    //     }
+    // }
+
+    fn new_better(&self, x1: usize, y1: usize, x2: usize, y2: usize) -> (f32, f32) {
+        // returns cost without swap and cost with cost
+        // not actually correct because pseudo_swap_get is slow
+        let mut original_cost = 0.0;
+        let mut swapped_cost = 0.0;
+        self.neighbor_deltas
+            .iter()
+            .for_each(|&((dx, dy), distance)| {
+                let x = self.modulo(x1, dx);
+                let y = self.modulo(y1, dy);
+                original_cost += Grid::cost(
+                    Color::distance(&self.colors[y1][x1], &self.colors[y][x]),
+                    distance,
+                );
+                swapped_cost += Grid::cost(
+                    Color::distance(&self.colors[y2][x2], &self.colors[y][x]),
+                    // Color::distance(
+                    //     &self.colors[y2][x2],
+                    //     self.pseudo_swap_get(x1, y1, x2, y2, x, y),
+                    // ),
+                    distance,
+                );
+            });
+        self.neighbor_deltas
+            .iter()
+            .for_each(|&((dx, dy), distance)| {
+                let x = self.modulo(x2, dx);
+                let y = self.modulo(y2, dy);
+                original_cost += Grid::cost(
+                    Color::distance(&self.colors[y2][x2], &self.colors[y][x]),
+                    distance,
+                );
+                swapped_cost += Grid::cost(
+                    Color::distance(&self.colors[y1][x1], &self.colors[y][x]),
+                    // Color::distance(
+                    //     &self.colors[y1][x1],
+                    //     self.pseudo_swap_get(x1, y1, x2, y2, x, y),
+                    // ),
+                    distance,
+                );
+            });
+
+        (original_cost, swapped_cost)
+    }
+
+    #[inline(always)]
     fn accept_prob(cost0: f32, cost1: f32, temperature: f32) -> f32 {
         if cost1 < cost0 {
             1.0
@@ -151,41 +251,37 @@ impl Grid {
         }
     }
 
-    pub(crate) fn tick(&mut self, rng: &mut impl Rng, temperature: f32) -> bool {
-        // returns whether pixels were swapped
+    // fn random_adjacent(rng: &mut impl Rng, x1: usize, y1: usize) -> (usize, usize) {
+    //     let x2 = {
+    //         if rng.gen_bool(0.5) {
+    //             if x1 == SIZE - 1 {
+    //                 return false;
+    //             }
+    //             x1 + 1
+    //         } else {
+    //             if x1 == 0 {
+    //                 return false;
+    //             }
+    //             x1 - 1
+    //         }
+    //     };
+    //     let y2 = {
+    //         if rng.gen_bool(0.5) {
+    //             if y1 == SIZE - 1 {
+    //                 return false;
+    //             }
+    //             y1 + 1
+    //         } else {
+    //             if y1 == 0 {
+    //                 return false;
+    //             }
+    //             y1 - 1
+    //         }
+    //     };
+    //     (x2, y2)
+    // }
 
-        let x1 = rng.gen_range(0..SIZE);
-        let y1 = rng.gen_range(0..SIZE);
-
-        // // random adjacent pixel
-        // let x2 = {
-        //     if rng.gen_bool(0.5) {
-        //         if x1 == SIZE - 1 {
-        //             return false;
-        //         }
-        //         x1 + 1
-        //     } else {
-        //         if x1 == 0 {
-        //             return false;
-        //         }
-        //         x1 - 1
-        //     }
-        // };
-        // let y2 = {
-        //     if rng.gen_bool(0.5) {
-        //         if y1 == SIZE - 1 {
-        //             return false;
-        //         }
-        //         y1 + 1
-        //     } else {
-        //         if y1 == 0 {
-        //             return false;
-        //         }
-        //         y1 - 1
-        //     }
-        // };
-
-        // random in LOCAL_RADIUS
+    fn random_in_local_radius(rng: &mut impl Rng, x1: usize, y1: usize) -> (usize, usize) {
         let x2 = x1 as i32 + rng.gen_range(-STEP_RADIUS..=STEP_RADIUS);
         let x2 = {
             if x2 < 0 {
@@ -206,45 +302,86 @@ impl Grid {
                 y2
             }
         } as usize;
-
-        // // random other pixel
-        // let x2 = rng.gen_range(0..SIZE);
-        // let y2 = rng.gen_range(0..SIZE);
-        // if x1 == x2 && y1 == y2 {
-        //     return false;
-        // }
-        
-        // if (x1, y1) in fixed_pixels or (x2, y2) in fixed_pixels:
-        //     return False
-
-        let (cost0, cost1) = self.new_better(x1, y1, x2, y2);
-
-        if rng.gen_range(0.0..1.0) < Grid::accept_prob(cost0, cost1, temperature) {
-            // keep swapped
-            true
-        } else {
-            // revert the swap
-            (self.colors[y1][x1], self.colors[y2][x2]) = (self.colors[y2][x2], self.colors[y1][x1]);
-            false
-        }
-
-        // if new_better || rng.gen_range(0.0..1.0) < temperature {
-        //     // keep them swapped
-        //     true
-        // } else {
-        //     // revert the swap
-        //     (self.colors[y1][x1], self.colors[y2][x2]) = (self.colors[y2][x2], self.colors[y1][x1]);
-        //     // self.approx_cost[y1][x1] = cost1;
-        //     // self.approx_cost[y2][x2] = cost2;
-        //     false
-        // }
+        (x2, y2)
     }
 
+    fn random_any(rng: &mut impl Rng, x1: usize, y1: usize) -> (usize, usize) {
+        let x2 = rng.gen_range(0..SIZE);
+        let y2 = rng.gen_range(0..SIZE);
+        (x2, y2)
+    }
+
+    pub(crate) fn par_tick(
+        &mut self,
+        rngs: &mut [rand::rngs::SmallRng],
+        temperature: f32,
+    ) -> usize {
+        // returns the number of steps taken
+        // where a step is a successful swap
+
+        // ticks needs to be small to preserve stability
+        // assert!(ticks < 16);
+
+        // println!("rayon::max_num_threads(): {}", rayon::max_num_threads());
+        // instead of (0..rayon::max_num_threads()), use a vec of Rng
+        let swap_is: Vec<(usize, usize, usize, usize)> = rngs
+            .par_iter_mut()
+            .filter_map(|rng: &mut SmallRng| {
+                let x1 = rng.gen_range(0..SIZE);
+                let y1 = rng.gen_range(0..SIZE);
+                // let (x2, y2) = Grid::random_adjacent(rng, x1, y1);
+                let (x2, y2) = Grid::random_in_local_radius(rng, x1, y1);
+                // let (x2, y2) = Grid::random_any(rng, x1, y1);
+                if x1 == x2 && y1 == y2 {
+                    return None;
+                }
+
+                let (cost0, cost1) = self.new_better(x1, y1, x2, y2);
+
+                if rng.gen_range(0.0..1.0) < Grid::accept_prob(cost0, cost1, temperature) {
+                    Some((x1, y1, x2, y2))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let steps = swap_is.len();
+        swap_is.into_iter().for_each(|(x1, y1, x2, y2)| {
+            self.swap(x1, y1, x2, y2);
+        });
+        steps
+    }
+
+    // pub(crate) fn tick(&mut self, rng: &mut impl Rng, temperature: f32) -> usize {
+    //     // returns the number of steps taken
+    //     // where a step is a successful swap
+
+    //     let x1 = rng.gen_range(0..SIZE);
+    //     let y1 = rng.gen_range(0..SIZE);
+    //     // let (x2, y2) = Grid::random_adjacent(rng, x1, y1);
+    //     let (x2, y2) = Grid::random_in_local_radius(rng, x1, y1);
+    //     // let (x2, y2) = Grid::random_any(rng, x1, y1);
+    //     if x1 == x2 && y1 == y2 {
+    //         return 0;
+    //     }
+
+    //     let (cost0, cost1) = self.new_better(x1, y1, x2, y2);
+
+    //     if rng.gen_range(0.0..1.0) < Grid::accept_prob(cost0, cost1, temperature) {
+    //         self.swap(x1, y1, x2, y2);
+    //         1
+    //     } else {
+    //         0
+    //     }
+    // }
+
+    #[inline(always)]
     fn point_distance(x0: i32, y0: i32, x1: i32, y1: i32) -> f32 {
         (((x0 - x1).pow(2) + (y0 - y1).pow(2)) as f32).sqrt()
         // ((x0 as f32 - x1 as f32).powi(2) + (y0 as f32 - y1 as f32).powi(2)).sqrt()
     }
 
+    #[inline(always)]
     fn cost(color_dist: f32, point_dist: f32) -> f32 {
         //  if x0 == x1 and y0 == y1:
         //      return 0
@@ -252,7 +389,7 @@ impl Grid {
         // assert!(point_dist <= LOCAL_RADIUS as f32);
 
         //  constant
-        //  return color_dist
+        // color_dist
 
         //  linear drop off
         (LOCAL_RADIUS as f32 - point_dist + 1.0) * color_dist
@@ -313,12 +450,12 @@ impl Grid {
             for (x, &color) in line.iter().enumerate() {
                 draw_handle.draw_rectangle_v(
                     raylib::prelude::Vector2 {
-                        x: x as f32 * crate::SCREEN_SIZE as f32 / SIZE as f32,
-                        y: y as f32 * crate::SCREEN_SIZE as f32 / SIZE as f32,
+                        x: x as f32 * draw_handle.get_screen_width() as f32 / SIZE as f32,
+                        y: y as f32 * draw_handle.get_screen_height() as f32 / SIZE as f32,
                     },
                     raylib::prelude::Vector2 {
-                        x: crate::SCREEN_SIZE as f32 / SIZE as f32,
-                        y: crate::SCREEN_SIZE as f32 / SIZE as f32,
+                        x: draw_handle.get_screen_width() as f32 / SIZE as f32,
+                        y: draw_handle.get_screen_height() as f32 / SIZE as f32,
                     },
                     Into::<raylib::prelude::Color>::into(color),
                 );
